@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Input } from "@cap/ui";
+import { Button } from "@cap/ui";
 import { faArrowLeft } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import Link from "next/link";
@@ -14,9 +14,36 @@ import { UpgradeModal } from "@/components/UpgradeModal";
 export const ImportLoomPage = () => {
 	const { user, activeOrganization } = useDashboardContext();
 	const router = useRouter();
-	const [loomUrl, setLoomUrl] = useState("");
+	const [urlsText, setUrlsText] = useState("");
 	const [isImporting, setIsImporting] = useState(false);
+	const [progress, setProgress] = useState<{
+		done: number;
+		total: number;
+		ok: number;
+		failed: number;
+	} | null>(null);
+	const [failedUrls, setFailedUrls] = useState<string[]>([]);
 	const [upgradeModalOpen, setUpgradeModalOpen] = useState(!user?.isPro);
+
+	const parseUrls = (): string[] => {
+		const seen = new Set<string>();
+		const out: string[] = [];
+		for (const raw of urlsText.split(/\s+/)) {
+			const u = raw.trim();
+			if (!u) continue;
+			try {
+				if (!new URL(u).hostname.includes("loom.com")) continue;
+			} catch {
+				continue;
+			}
+			if (seen.has(u)) continue;
+			seen.add(u);
+			out.push(u);
+		}
+		return out;
+	};
+
+	const validUrls = parseUrls();
 
 	const handleImport = async () => {
 		if (!user || !activeOrganization) return;
@@ -26,41 +53,54 @@ export const ImportLoomPage = () => {
 			return;
 		}
 
-		if (!loomUrl.trim()) return;
+		const urls = parseUrls();
+		if (urls.length === 0) {
+			toast.error("Paste at least one valid Loom URL.");
+			return;
+		}
 
 		setIsImporting(true);
+		setFailedUrls([]);
+		setProgress({ done: 0, total: urls.length, ok: 0, failed: 0 });
 
-		try {
-			const result = await importFromLoom({
-				loomUrl: loomUrl.trim(),
-				orgId: activeOrganization.organization.id,
-			});
+		let ok = 0;
+		let failed = 0;
+		const failures: string[] = [];
 
-			if (!result.success) {
-				toast.error(result.error || "Failed to import video.");
-				setIsImporting(false);
-				return;
+		for (let i = 0; i < urls.length; i++) {
+			try {
+				const result = await importFromLoom({
+					loomUrl: urls[i],
+					orgId: activeOrganization.organization.id,
+				});
+				if (result.success) {
+					ok++;
+				} else {
+					failed++;
+					failures.push(urls[i]);
+				}
+			} catch {
+				failed++;
+				failures.push(urls[i]);
 			}
+			setProgress({ done: i + 1, total: urls.length, ok, failed });
+		}
 
+		setFailedUrls(failures);
+		setIsImporting(false);
+
+		if (failed === 0) {
 			toast.success(
-				"Loom video import started! It will appear in your caps shortly.",
+				`Started importing ${ok} Loom video${ok === 1 ? "" : "s"}! They'll appear in your caps shortly.`,
 			);
 			router.push("/dashboard/caps");
-		} catch {
-			toast.error("An unexpected error occurred. Please try again.");
-		} finally {
-			setIsImporting(false);
+		} else {
+			toast.error(
+				`Started ${ok}, failed ${failed}. Failed URLs are kept below — fix or retry those.`,
+			);
+			setUrlsText(failures.join("\n"));
 		}
 	};
-
-	const isValidLoomUrl = (() => {
-		try {
-			const parsed = new URL(loomUrl.trim());
-			return parsed.hostname.includes("loom.com");
-		} catch {
-			return false;
-		}
-	})();
 
 	return (
 		<div className="flex flex-col w-full h-full">
@@ -74,7 +114,7 @@ export const ImportLoomPage = () => {
 				</Link>
 				<h1 className="text-2xl font-medium text-gray-12">Import from Loom</h1>
 				<p className="mt-1 text-sm text-gray-10">
-					Paste a Loom video URL to import it to Cap.
+					Paste one or more Loom video URLs (one per line) to import them to Cap.
 				</p>
 			</div>
 
@@ -98,49 +138,64 @@ export const ImportLoomPage = () => {
 							</svg>
 						</div>
 						<div>
-							<p className="text-sm font-medium text-gray-12">Loom Video URL</p>
+							<p className="text-sm font-medium text-gray-12">Loom Video URLs</p>
 							<p className="text-xs text-gray-10">
-								The video will be downloaded and processed in the background.
+								One URL per line. Each video is downloaded and processed in the
+								background.
 							</p>
 						</div>
 					</div>
 
-					<Input
-						value={loomUrl}
-						onChange={(e) => setLoomUrl(e.target.value)}
-						placeholder="https://www.loom.com/share/..."
-						onKeyDown={(e) => {
-							if (e.key === "Enter" && isValidLoomUrl && !isImporting) {
-								handleImport();
-							}
-						}}
+					<textarea
+						value={urlsText}
+						onChange={(e) => setUrlsText(e.target.value)}
+						placeholder={"https://www.loom.com/share/...\nhttps://www.loom.com/share/..."}
+						rows={10}
+						disabled={isImporting}
+						className="w-full rounded-lg border border-gray-3 bg-gray-1 p-3 text-sm font-mono text-gray-12 resize-y focus:outline-none focus:border-gray-8"
 					/>
 
-					<div className="flex gap-3 justify-end">
-						<Button
-							size="sm"
-							variant="gray"
-							onClick={() => router.push("/dashboard/import")}
-						>
-							Cancel
-						</Button>
-						<Button
-							onClick={handleImport}
-							size="sm"
-							spinner={isImporting}
-							variant="dark"
-							disabled={!isValidLoomUrl || isImporting}
-						>
-							{isImporting ? "Importing..." : "Import Video"}
-						</Button>
+					<div className="flex items-center justify-between gap-3">
+						<p className="text-xs text-gray-10">
+							{validUrls.length} valid URL{validUrls.length === 1 ? "" : "s"}{" "}
+							detected
+							{progress
+								? ` · ${progress.done}/${progress.total} processed (${progress.ok} ok, ${progress.failed} failed)`
+								: ""}
+						</p>
+						<div className="flex gap-3 justify-end">
+							<Button
+								size="sm"
+								variant="gray"
+								disabled={isImporting}
+								onClick={() => router.push("/dashboard/import")}
+							>
+								Cancel
+							</Button>
+							<Button
+								onClick={handleImport}
+								size="sm"
+								spinner={isImporting}
+								variant="dark"
+								disabled={validUrls.length === 0 || isImporting}
+							>
+								{isImporting
+									? `Importing ${progress?.done ?? 0}/${progress?.total ?? 0}...`
+									: `Import ${validUrls.length || ""} video${validUrls.length === 1 ? "" : "s"}`}
+							</Button>
+						</div>
 					</div>
+
+					{failedUrls.length > 0 && !isImporting ? (
+						<p className="text-xs text-red-500">
+							{failedUrls.length} failed and were kept in the box above so you can
+							retry them.
+						</p>
+					) : null}
 				</div>
 			</div>
 
-			<UpgradeModal
-				open={upgradeModalOpen}
-				onOpenChange={setUpgradeModalOpen}
-			/>
+			<UpgradeModal open={upgradeModalOpen} onOpenChange={setUpgradeModalOpen} />
 		</div>
 	);
 };
