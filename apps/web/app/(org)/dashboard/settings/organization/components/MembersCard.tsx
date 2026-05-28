@@ -179,13 +179,8 @@ export const MembersCard = ({
 						variant="dark"
 						className="px-6 min-w-auto"
 						onClick={() => {
-							if (!isOwner) {
-								showOwnerToast();
-								return;
-							}
 							setIsInviteDialogOpen(true);
 						}}
-						disabled={!isOwner}
 					>
 						+ Invite users
 					</Button>

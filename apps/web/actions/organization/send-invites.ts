@@ -35,8 +35,17 @@ export async function sendOrganizationInvites(
 		throw new Error("Organization not found");
 	}
 
-	if (organization.ownerId !== user.id) {
-		throw new Error("Only the organization owner can send invites");
+		const inviteAllowlist = (process.env.INVITE_ALLOWED_EMAILS ?? "")
+		.split(",")
+		.map((e) => e.trim().toLowerCase())
+		.filter(Boolean);
+	const emailAllowed =
+		!!user.email && inviteAllowlist.includes(user.email.toLowerCase());
+
+	if (organization.ownerId !== user.id && !emailAllowed) {
+		throw new Error(
+			"Only the organization owner or allowlisted users can send invites",
+		);
 	}
 
 	const MAX_INVITES = 50;

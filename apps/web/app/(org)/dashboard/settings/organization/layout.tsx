@@ -33,7 +33,14 @@ export default async function OrganizationSettingsLayout({
 		)
 		.limit(1);
 
-	if (!member || member.role !== "owner") {
+		const inviteAllowlist = (process.env.INVITE_ALLOWED_EMAILS ?? "")
+		.split(",")
+		.map((e) => e.trim().toLowerCase())
+		.filter(Boolean);
+	const emailAllowed =
+		!!user.email && inviteAllowlist.includes(user.email.toLowerCase());
+
+	if (!member || (member.role !== "owner" && !emailAllowed)) {
 		redirect("/dashboard/caps");
 	}
 
